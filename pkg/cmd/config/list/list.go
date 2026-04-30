@@ -56,7 +56,11 @@ func listRun(opts *ListOptions) error {
 	}
 
 	for _, option := range config.Options {
-		fmt.Fprintf(opts.IO.Out, "%s=%s\n", option.Key, option.CurrentValue(cfg, host))
+		value := option.CurrentValue(cfg, host)
+		if option.Scope == config.ScopeHostOnly && value == "" {
+			continue
+		}
+		fmt.Fprintf(opts.IO.Out, "%s=%s\n", option.Key, value)
 	}
 
 	return nil

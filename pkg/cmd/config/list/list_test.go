@@ -107,6 +107,29 @@ func Test_listRun(t *testing.T) {
 				telemetry=enabled
 			`),
 		},
+		{
+			name: "list host-only key when set",
+			config: func() gh.Config {
+				cfg := config.NewBlankConfig()
+				cfg.Set("HOST", "api_base_url", "https://github-proxy.example.com")
+				return cfg
+			}(),
+			input: &ListOptions{Hostname: "HOST"},
+			stdout: heredoc.Doc(`
+				git_protocol=https
+				editor=
+				prompt=enabled
+				prefer_editor_prompt=disabled
+				pager=
+				http_unix_socket=
+				browser=
+				color_labels=disabled
+				accessible_colors=disabled
+				accessible_prompter=disabled
+				spinner=enabled
+				api_base_url=https://github-proxy.example.com
+			`),
+		},
 	}
 
 	for _, tt := range tests {

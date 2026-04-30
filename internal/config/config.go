@@ -20,6 +20,7 @@ const (
 	accessibleColorsKey   = "accessible_colors" // used by cli/go-gh to enable the use of customizable, accessible 4-bit colors.
 	accessiblePrompterKey = "accessible_prompter"
 	aliasesKey            = "aliases"
+	apiBaseURLKey         = "api_base_url"
 	browserKey            = "browser" // used by cli/go-gh to open URLs in web browsers
 	colorLabelsKey        = "color_labels"
 	editorKey             = "editor" // used by cli/go-gh to open interactive text editor
@@ -66,7 +67,27 @@ func (c *cfg) get(hostname, key string) o.Option[string] {
 	return o.None[string]()
 }
 
+func (c *cfg) getHostOnly(hostname, key string) o.Option[string] {
+	if hostname == "" {
+		return o.None[string]()
+	}
+
+	val, err := c.cfg.Get([]string{hostsKey, hostname, key})
+	if err == nil {
+		return o.Some(val)
+	}
+
+	return o.None[string]()
+}
+
 func (c *cfg) GetOrDefault(hostname, key string) o.Option[gh.ConfigEntry] {
+	if option, ok := OptionForKey(key); ok && option.Scope == ScopeHostOnly {
+		if val := c.getHostOnly(hostname, key); val.IsSome() {
+			return o.Map(val, toConfigEntry(gh.ConfigUserProvided))
+		}
+		return o.None[gh.ConfigEntry]()
+	}
+
 	if val := c.get(hostname, key); val.IsSome() {
 		// Map the Option[string] to Option[gh.ConfigEntry] with a source of ConfigUserProvided
 		return o.Map(val, toConfigEntry(gh.ConfigUserProvided))
@@ -123,6 +144,14 @@ func (c *cfg) AccessibleColors(hostname string) gh.ConfigEntry {
 func (c *cfg) AccessiblePrompter(hostname string) gh.ConfigEntry {
 	// Intentionally panic if there is no user provided value or default value (which would be a programmer error)
 	return c.GetOrDefault(hostname, accessiblePrompterKey).Unwrap()
+}
+
+func (c *cfg) APIBaseURL(hostname string) gh.ConfigEntry {
+	// API base URLs are host-owned and intentionally do not fall back to top-level config.
+	if val := c.getHostOnly(hostname, apiBaseURLKey); val.IsSome() {
+		return gh.ConfigEntry{Value: val.Unwrap(), Source: gh.ConfigUserProvided}
+	}
+	return gh.ConfigEntry{Value: "", Source: gh.ConfigDefaultProvided}
 }
 
 func (c *cfg) Browser(hostname string) gh.ConfigEntry {
@@ -213,10 +242,8 @@ func (c *cfg) CacheDir() string {
 }
 
 func defaultFor(key string) o.Option[string] {
-	for _, co := range Options {
-		if co.Key == key {
-			return o.Some(co.DefaultValue)
-		}
+	if co, ok := OptionForKey(key); ok {
+		return o.Some(co.DefaultValue)
 	}
 	return o.None[string]()
 }
@@ -584,12 +611,29 @@ accessible_prompter: disabled
 spinner: enabled
 `
 
+type ConfigScope int
+
+const (
+	ScopeGlobalOrHost ConfigScope = iota
+	ScopeHostOnly
+)
+
 type ConfigOption struct {
 	Key           string
 	Description   string
 	DefaultValue  string
 	AllowedValues []string
+	Scope         ConfigScope
 	CurrentValue  func(c gh.Config, hostname string) string
+}
+
+func OptionForKey(key string) (ConfigOption, bool) {
+	for _, option := range Options {
+		if option.Key == key {
+			return option, true
+		}
+	}
+	return ConfigOption{}, false
 }
 
 var Options = []ConfigOption{
@@ -686,6 +730,14 @@ var Options = []ConfigOption{
 		AllowedValues: []string{"enabled", "disabled"},
 		CurrentValue: func(c gh.Config, hostname string) string {
 			return c.Spinner(hostname).Value
+		},
+	},
+	{
+		Key:         apiBaseURLKey,
+		Description: "the base URL to use for GitHub API requests for this host",
+		Scope:       ScopeHostOnly,
+		CurrentValue: func(c gh.Config, hostname string) string {
+			return c.APIBaseURL(hostname).Value
 		},
 	},
 	{

@@ -133,6 +133,26 @@ func Test_setRun(t *testing.T) {
 			wantsErr: true,
 			errMsg:   "failed to set \"git_protocol\" to \"invalid\": valid values are 'https', 'ssh'",
 		},
+		{
+			name: "set host-only key without host",
+			input: &SetOptions{
+				Config: config.NewBlankConfig(),
+				Key:    "api_base_url",
+				Value:  "https://github-proxy.example.com",
+			},
+			wantsErr: true,
+			errMsg:   "api_base_url must be set with --host",
+		},
+		{
+			name: "set host-only key with host",
+			input: &SetOptions{
+				Config:   config.NewBlankConfig(),
+				Hostname: "github.example.com",
+				Key:      "api_base_url",
+				Value:    "https://github-proxy.example.com",
+			},
+			expectedValue: "https://github-proxy.example.com",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -150,8 +170,11 @@ func Test_setRun(t *testing.T) {
 			assert.Equal(t, tt.stdout, stdout.String())
 			assert.Equal(t, tt.stderr, stderr.String())
 
-			optionalEntry := tt.input.Config.GetOrDefault(tt.input.Hostname, tt.input.Key)
-			entry := optionalEntry.Expect("expected a value to be set")
+			entry := tt.input.Config.APIBaseURL(tt.input.Hostname)
+			if tt.input.Key != "api_base_url" {
+				optionalEntry := tt.input.Config.GetOrDefault(tt.input.Hostname, tt.input.Key)
+				entry = optionalEntry.Expect("expected a value to be set")
+			}
 			assert.Equal(t, tt.expectedValue, entry.Value)
 			assert.Equal(t, gh.ConfigUserProvided, entry.Source)
 		})
@@ -172,6 +195,9 @@ func Test_ValidateValue(t *testing.T) {
 	assert.NoError(t, err)
 
 	err = ValidateValue("http_unix_socket", "really_anything/is/allowed/and/net.Dial\\(...\\)/will/ultimately/validate")
+	assert.NoError(t, err)
+
+	err = ValidateValue("api_base_url", "https://github-proxy.example.com")
 	assert.NoError(t, err)
 }
 
@@ -195,5 +221,19 @@ func Test_ValidateKey(t *testing.T) {
 	assert.NoError(t, err)
 
 	err = ValidateKey("browser")
+	assert.NoError(t, err)
+
+	err = ValidateKey("api_base_url")
+	assert.NoError(t, err)
+}
+
+func Test_ValidateScope(t *testing.T) {
+	err := ValidateScope("api_base_url", "")
+	assert.EqualError(t, err, "api_base_url must be set with --host")
+
+	err = ValidateScope("api_base_url", "github.example.com")
+	assert.NoError(t, err)
+
+	err = ValidateScope("editor", "")
 	assert.NoError(t, err)
 }

@@ -1,9 +1,11 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -17,9 +19,12 @@ type tokenGetter interface {
 	ActiveToken(string) (string, string)
 }
 
+type APIBaseURLResolver func(hostname string) string
+
 type HTTPClientOptions struct {
 	AppVersion         string
 	InvokingAgent      string
+	APIBaseURL        APIBaseURLResolver
 	CacheTTL           time.Duration
 	Config             tokenGetter
 	EnableCache        bool
@@ -70,6 +75,10 @@ func NewHTTPClient(opts HTTPClientOptions) (*http.Client, error) {
 	client, err := ghAPI.NewHTTPClient(clientOpts)
 	if err != nil {
 		return nil, err
+	}
+
+	if opts.APIBaseURL != nil {
+		client.Transport = RewriteAPIBaseURL(client.Transport, opts.APIBaseURL)
 	}
 
 	if opts.Config != nil {
@@ -123,6 +132,35 @@ func AddAuthTokenHeader(rt http.RoundTripper, cfg tokenGetter) http.RoundTripper
 			}
 		}
 		return rt.RoundTrip(req)
+	}}
+}
+
+// RewriteAPIBaseURL rewrites requests for a canonical host to a configured API base URL.
+// This must run after auth headers are selected so tokens are looked up for the canonical host.
+func RewriteAPIBaseURL(rt http.RoundTripper, resolver APIBaseURLResolver) http.RoundTripper {
+	return &funcTripper{roundTrip: func(req *http.Request) (*http.Response, error) {
+		hostname := ghauth.NormalizeHostname(getHost(req))
+		apiBaseURL := resolver(hostname)
+		if apiBaseURL == "" {
+			return rt.RoundTrip(req)
+		}
+
+		baseURL, err := url.Parse(apiBaseURL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid api_base_url for %s: %w", hostname, err)
+		}
+		if baseURL.Scheme == "" || baseURL.Host == "" {
+			return nil, fmt.Errorf("invalid api_base_url for %s: %w", hostname, errors.New("must include scheme and host"))
+		}
+		if (baseURL.Path != "" && baseURL.Path != "/") || baseURL.RawQuery != "" || baseURL.Fragment != "" {
+			return nil, fmt.Errorf("invalid api_base_url for %s: %w", hostname, errors.New("must not include path, query, or fragment"))
+		}
+
+		rewritten := req.Clone(req.Context())
+		rewritten.URL.Scheme = baseURL.Scheme
+		rewritten.URL.Host = baseURL.Host
+		rewritten.Host = baseURL.Host
+		return rt.RoundTrip(rewritten)
 	}}
 }
 

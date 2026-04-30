@@ -11,6 +11,7 @@ import (
 	"github.com/cli/cli/v2/pkg/httpmock"
 	"github.com/cli/cli/v2/pkg/iostreams"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestClient(reg *httpmock.Registry) *Client {
@@ -242,7 +243,8 @@ func TestHTTPHeaders(t *testing.T) {
 	client := NewClientFromHTTP(httpClient)
 
 	err = client.REST(ts.URL, "GET", ts.URL+"/user/repos", nil, nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	require.NotNil(t, gotReq)
 
 	wantHeader := map[string]string{
 		"Accept":               "application/vnd.github.merge-info-preview+json, application/vnd.github.nebula-preview",

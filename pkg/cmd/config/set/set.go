@@ -78,6 +78,11 @@ func setRun(opts *SetOptions) error {
 		}
 	}
 
+	err = ValidateScope(opts.Key, opts.Hostname)
+	if err != nil {
+		return err
+	}
+
 	opts.Config.Set(opts.Hostname, opts.Key, opts.Value)
 
 	err = opts.Config.Write()
@@ -88,10 +93,8 @@ func setRun(opts *SetOptions) error {
 }
 
 func ValidateKey(key string) error {
-	for _, configKey := range config.Options {
-		if key == configKey.Key {
-			return nil
-		}
+	if _, ok := config.OptionForKey(key); ok {
+		return nil
 	}
 
 	return fmt.Errorf("invalid key")
@@ -108,11 +111,8 @@ func (e InvalidValueError) Error() string {
 func ValidateValue(key, value string) error {
 	var validValues []string
 
-	for _, v := range config.Options {
-		if v.Key == key {
-			validValues = v.AllowedValues
-			break
-		}
+	if option, ok := config.OptionForKey(key); ok {
+		validValues = option.AllowedValues
 	}
 
 	if validValues == nil {
@@ -126,4 +126,11 @@ func ValidateValue(key, value string) error {
 	}
 
 	return InvalidValueError{ValidValues: validValues}
+}
+
+func ValidateScope(key, hostname string) error {
+	if option, ok := config.OptionForKey(key); ok && option.Scope == config.ScopeHostOnly && hostname == "" {
+		return fmt.Errorf("%s must be set with --host", key)
+	}
+	return nil
 }

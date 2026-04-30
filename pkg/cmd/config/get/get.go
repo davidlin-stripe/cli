@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/MakeNowJust/heredoc"
+	"github.com/cli/cli/v2/internal/config"
 	"github.com/cli/cli/v2/internal/gh"
 	"github.com/cli/cli/v2/pkg/cmdutil"
 	"github.com/cli/cli/v2/pkg/iostreams"
@@ -61,6 +62,17 @@ func getRun(opts *GetOptions) error {
 		}
 		fmt.Fprintf(opts.IO.Out, "%s\n", token)
 		return nil
+	}
+
+	if option, ok := config.OptionForKey(opts.Key); ok && option.Scope == config.ScopeHostOnly {
+		if opts.Hostname == "" {
+			return fmt.Errorf("%s must be read with --host", opts.Key)
+		}
+		if val := option.CurrentValue(opts.Config, opts.Hostname); val != "" {
+			fmt.Fprintf(opts.IO.Out, "%s\n", val)
+			return nil
+		}
+		return nonExistentKeyError{key: opts.Key}
 	}
 
 	optionalEntry := opts.Config.GetOrDefault(opts.Hostname, opts.Key)

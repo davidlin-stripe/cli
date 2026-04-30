@@ -2,6 +2,7 @@ package get
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/cli/cli/v2/internal/config"
@@ -116,6 +117,40 @@ func Test_getRun(t *testing.T) {
 				Config: config.NewBlankConfig(),
 			},
 			err: nonExistentKeyError{key: "non-existent"},
+		},
+		{
+			name: "host-only key without host",
+			input: &GetOptions{
+				Key:    "api_base_url",
+				Config: config.NewBlankConfig(),
+			},
+			err: errors.New("api_base_url must be read with --host"),
+		},
+		{
+			name: "host-only key with host",
+			input: &GetOptions{
+				Hostname: "github.example.com",
+				Key:      "api_base_url",
+				Config: func() gh.Config {
+					cfg := config.NewBlankConfig()
+					cfg.Set("github.example.com", "api_base_url", "https://github-proxy.example.com")
+					return cfg
+				}(),
+			},
+			stdout: "https://github-proxy.example.com\n",
+		},
+		{
+			name: "host-only key ignores top-level value",
+			input: &GetOptions{
+				Hostname: "github.example.com",
+				Key:      "api_base_url",
+				Config: func() gh.Config {
+					cfg := config.NewBlankConfig()
+					cfg.Set("", "api_base_url", "https://top-level-proxy.example.com")
+					return cfg
+				}(),
+			},
+			err: nonExistentKeyError{key: "api_base_url"},
 		},
 	}
 
