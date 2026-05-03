@@ -127,11 +127,13 @@ func (c *cfg) AccessiblePrompter(hostname string) gh.ConfigEntry {
 }
 
 func (c *cfg) APIBaseURL(hostname string) gh.ConfigEntry {
-	if hostname == "" {
-		return gh.ConfigEntry{Value: "", Source: gh.ConfigDefaultProvided}
+	if hostname != "" {
+		if val, err := c.cfg.Get([]string{hostsKey, hostname, apiBaseURLKey}); err == nil {
+			return gh.ConfigEntry{Value: val, Source: gh.ConfigUserProvided}
+		}
 	}
-	
-	return c.GetOrDefault(hostname, apiBaseURLKey).Unwrap()
+
+	return gh.ConfigEntry{Value: "", Source: gh.ConfigDefaultProvided}
 }
 
 func (c *cfg) Browser(hostname string) gh.ConfigEntry {
