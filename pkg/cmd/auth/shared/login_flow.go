@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -32,6 +33,7 @@ type LoginOptions struct {
 	HTTPClient       *http.Client
 	PlainHTTPClient  *http.Client
 	Hostname         string
+	APIBaseURL       string
 	Interactive      bool
 	Web              bool
 	Scopes           []string
@@ -49,6 +51,7 @@ type LoginOptions struct {
 func Login(opts *LoginOptions) error {
 	cfg := opts.Config
 	hostname := opts.Hostname
+	apiHost := apiHostFromBaseURL(opts.APIBaseURL, hostname)
 	httpClient := opts.HTTPClient
 	cs := opts.IO.ColorScheme()
 
@@ -150,7 +153,7 @@ func Login(opts *LoginOptions) error {
 
 	if authMode == 0 {
 		var err error
-		authToken, username, err = authflow.AuthFlow(opts.PlainHTTPClient, hostname, opts.IO, "", append(opts.Scopes, additionalScopes...), opts.Interactive, opts.Browser, opts.CopyToClipboard)
+		authToken, username, err = authflow.AuthFlow(opts.PlainHTTPClient, apiHost, opts.IO, "", append(opts.Scopes, additionalScopes...), opts.Interactive, opts.Browser, opts.CopyToClipboard)
 		if err != nil {
 			return fmt.Errorf("failed to authenticate via web browser: %w", err)
 		}
@@ -160,7 +163,7 @@ func Login(opts *LoginOptions) error {
 		fmt.Fprint(opts.IO.ErrOut, heredoc.Docf(`
 			Tip: you can generate a Personal Access Token here https://%s/settings/tokens
 			The minimum required scopes are %s.
-		`, hostname, scopesSentence(minimumScopes)))
+		`, apiHost, scopesSentence(minimumScopes)))
 
 		var err error
 		authToken, err = opts.Prompter.AuthToken()
@@ -168,14 +171,14 @@ func Login(opts *LoginOptions) error {
 			return err
 		}
 
-		if err := HasMinimumScopes(httpClient, hostname, authToken); err != nil {
+		if err := HasMinimumScopes(httpClient, apiHost, authToken); err != nil {
 			return fmt.Errorf("error validating token: %w", err)
 		}
 	}
 
 	if username == "" {
 		var err error
-		username, err = GetCurrentLogin(httpClient, hostname, authToken)
+		username, err = GetCurrentLogin(httpClient, apiHost, authToken)
 		if err != nil {
 			return fmt.Errorf("error retrieving current user: %w", err)
 		}
@@ -229,6 +232,17 @@ func Login(opts *LoginOptions) error {
 	}
 
 	return nil
+}
+
+func apiHostFromBaseURL(apiBaseURL, fallback string) string {
+	if apiBaseURL == "" {
+		return fallback
+	}
+	u, err := url.Parse(apiBaseURL)
+	if err != nil || u.Host == "" {
+		return fallback
+	}
+	return u.Hostname()
 }
 
 func scopesSentence(scopes []string) string {

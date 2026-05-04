@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/MakeNowJust/heredoc"
@@ -37,6 +38,7 @@ type LoginOptions struct {
 	Token            string
 	Web              bool
 	GitProtocol      string
+	APIBaseURL       string
 	InsecureStorage  bool
 	SkipSSHKeyPrompt bool
 	Clipboard        bool
@@ -134,6 +136,15 @@ func NewCmdLogin(f *cmdutil.Factory, runF func(*LoginOptions) error) *cobra.Comm
 				}
 			}
 
+			if cmd.Flags().Changed("api-base-url") {
+				if _, err := parseAPIBaseURL(opts.APIBaseURL); err != nil {
+					return cmdutil.FlagErrorf("error parsing --api-base-url: %w", err)
+				}
+				if opts.Hostname == "" {
+					return cmdutil.FlagErrorf("--api-base-url requires --hostname")
+				}
+			}
+
 			if opts.Hostname == "" && (!opts.Interactive || opts.Web) {
 				opts.Hostname, _ = ghauth.DefaultHost()
 			}
@@ -148,6 +159,7 @@ func NewCmdLogin(f *cmdutil.Factory, runF func(*LoginOptions) error) *cobra.Comm
 	}
 
 	cmd.Flags().StringVarP(&opts.Hostname, "hostname", "h", "", "The hostname of the GitHub instance to authenticate with")
+	cmd.Flags().StringVar(&opts.APIBaseURL, "api-base-url", "", "The base URL for API requests (use when git hostname differs from API hostname)")
 	cmd.Flags().StringSliceVarP(&opts.Scopes, "scopes", "s", nil, "Additional authentication scopes to request")
 	cmd.Flags().BoolVar(&tokenStdin, "with-token", false, "Read token from standard input")
 	cmd.Flags().BoolVarP(&opts.Web, "web", "w", false, "Open a browser to authenticate")
@@ -202,26 +214,31 @@ func loginRun(opts *LoginOptions) error {
 		return err
 	}
 
+	apiHost := apiHostFromBaseURL(opts.APIBaseURL, hostname)
+
 	if opts.Token != "" {
-		if err := shared.HasMinimumScopes(httpClient, hostname, opts.Token); err != nil {
+		if err := shared.HasMinimumScopes(httpClient, apiHost, opts.Token); err != nil {
 			return fmt.Errorf("error validating token: %w", err)
 		}
-		username, err := shared.GetCurrentLogin(httpClient, hostname, opts.Token)
+		username, err := shared.GetCurrentLogin(httpClient, apiHost, opts.Token)
 		if err != nil {
 			return fmt.Errorf("error retrieving current user: %w", err)
 		}
 
 		// Adding a user key ensures that a nonempty host section gets written to the config file.
-		_, loginErr := authCfg.Login(hostname, username, opts.Token, opts.GitProtocol, !opts.InsecureStorage)
-		return loginErr
+		if _, err := authCfg.Login(hostname, username, opts.Token, opts.GitProtocol, !opts.InsecureStorage); err != nil {
+			return err
+		}
+		return setAPIBaseURL(cfg, hostname, opts.APIBaseURL)
 	}
 
-	return shared.Login(&shared.LoginOptions{
+	if err := shared.Login(&shared.LoginOptions{
 		IO:              opts.IO,
 		Config:          authCfg,
 		HTTPClient:      httpClient,
 		PlainHTTPClient: plainHTTPClient,
 		Hostname:        hostname,
+		APIBaseURL:      opts.APIBaseURL,
 		Interactive:     opts.Interactive,
 		Web:             opts.Web,
 		Scopes:          opts.Scopes,
@@ -241,7 +258,10 @@ func loginRun(opts *LoginOptions) error {
 		SecureStorage:    !opts.InsecureStorage,
 		SkipSSHKeyPrompt: opts.SkipSSHKeyPrompt,
 		CopyToClipboard:  opts.Clipboard,
-	})
+	}); err != nil {
+		return err
+	}
+	return setAPIBaseURL(cfg, hostname, opts.APIBaseURL)
 }
 
 func promptForHostname(opts *LoginOptions) (string, error) {
@@ -260,4 +280,34 @@ func promptForHostname(opts *LoginOptions) (string, error) {
 	}
 
 	return opts.Prompter.InputHostname()
+}
+
+func parseAPIBaseURL(rawURL string) (*url.URL, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return nil, fmt.Errorf("must include scheme and host (e.g. https://github.example.com)")
+	}
+	return u, nil
+}
+
+func apiHostFromBaseURL(apiBaseURL, fallback string) string {
+	if apiBaseURL == "" {
+		return fallback
+	}
+	u, err := parseAPIBaseURL(apiBaseURL)
+	if err != nil {
+		return fallback
+	}
+	return u.Hostname()
+}
+
+func setAPIBaseURL(cfg gh.Config, hostname, apiBaseURL string) error {
+	if apiBaseURL == "" {
+		return nil
+	}
+	cfg.Set(hostname, "api_base_url", apiBaseURL)
+	return cfg.Write()
 }

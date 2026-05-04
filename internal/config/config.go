@@ -226,7 +226,7 @@ func (c *cfg) CacheDir() string {
 func defaultFor(key string) o.Option[string] {
 	for _, co := range Options {
 		if co.Key == key {
-		return o.Some(co.DefaultValue)
+			return o.Some(co.DefaultValue)
 		}
 	}
 	return o.None[string]()
